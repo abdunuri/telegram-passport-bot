@@ -47,8 +47,9 @@ active_sessions = defaultdict(dict)
     ADDRESS_STREET,
     ADDRESS_HOUSE_NO,
     ADDRESS_PO_BOX,
-    PAGE_QUANTITY_STATE,
-) = range(20,30,1)
+) = range(20,29,1)
+
+PAGE_QUANTITY_STATE= 290
 # File upload states
 (
     FILE_UPLOAD_ID_DOC,
