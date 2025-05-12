@@ -188,6 +188,8 @@ async def ask_city_response(update: Update, context: ContextTypes.DEFAULT_TYPE)-
     city_name = next((text for value, text in context.user_data["city_options"] if value == selected_value), "Unknown")
 
     await query.edit_message_text(text=f"✅ City selected: {city_name}!")
+    # Save the selected city in user_data
+    context.user_data["city"] = city_name
     return await ask_office(update, context)
 
 async def ask_office(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -636,6 +638,7 @@ async def fill_personal_form_on_page(update: Update, context: ContextTypes.DEFAU
     """
     region_select = active_sessions[chat_id]['page'].locator("select[name='region']")
     await region_select.select_option(value=user_data["region"])
+    await page.fill('input[name="city"]', user_data["city"])
     await fill_address_form_on_page(update, context)
     #return await address_region(update, context)
     
