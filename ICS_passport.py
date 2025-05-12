@@ -753,6 +753,12 @@ async def address_po_box(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     return await fill_address_form_on_page(update, context)
 """
 async def fill_address_form_on_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    # Click Next buttons
+    await page.get_by_role("button", name="Next").click()
+    await page.get_by_role("button", name="Next").click()
+    return await ask_page_quantity(update, context)
+
+
     """
     Fill the address form on the page using user data.
     This function is comment out to avoid optional address form filling. for reducing the time
@@ -773,10 +779,7 @@ async def fill_address_form_on_page(update: Update, context: ContextTypes.DEFAUL
     await page.fill('input[name="houseNo"]', user_data["address_house_no"])
     await page.fill('input[name="poBox"]', user_data["address_po_box"])
 """
-    # Click Next buttons
-    await page.get_by_role("button", name="Next").click()
-    await page.get_by_role("button", name="Next").click()
-    return await ask_page_quantity(update, context)
+
 
 async def ask_page_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.message or update.callback_query.message
