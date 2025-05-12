@@ -62,11 +62,11 @@ active_sessions = defaultdict(dict)
 
 # --- Dropdown Sequence Configuration ---
 DROPDOWN_SEQUENCE = [
-    ('select[name="hairColor"]', "Hair Color", 3),  # Last number is buttons per row
-    ('select[name="eyeColor"]', "Eye Color", 3),
+    #('select[name="hairColor"]', "Hair Color", 3),  # Last number is buttons per row
+    #('select[name="eyeColor"]', "Eye Color", 3),
     ('select[name="gender"]', "Gender", 2),
     ('select[name="martialStatus"]', "Marital Status", 3),
-    ('select[name="occupationId"]', "Occupation", 1),  # 1 means we'll use pagination
+    #('select[name="occupationId"]', "Occupation", 1),  # 1 means we'll use pagination
 ]
 
 # Pagination configuration
@@ -130,6 +130,8 @@ async def ask_region_response(update: Update, context: ContextTypes.DEFAULT_TYPE
     region_name = next((text for value, text in context.user_data["region_options"] if value == selected_value), "Unknown")
 
     await query.edit_message_text(text=f"✅ Region selected: {region_name}!")
+    # Save the selected region in user_data in order to use it it in the address form
+    context.user_data["region"] = region_name
     return await ask_city(update, context)
 
 async def ask_city(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -436,24 +438,37 @@ async def handle_gez_middle_name(update: Update, context: ContextTypes.DEFAULT_T
 async def handle_gez_last_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.message or update.callback_query.message
     context.user_data["amharic_last_name"] = message.text.strip()
-    await message.reply_text("Enter your Birth Place:")
+    await message.reply_text("Enter your Birth Place: ")
     return PERSONAL_BIRTHPLACE
 
 async def handle_birth_place(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.message or update.callback_query.message
     context.user_data["birth_place"] = message.text.strip()
-    await message.reply_text("Enter your Birth Certificate Number:")
-    return PERSONAL_BIRTH_CERT_NO
+    await message.reply_text("Enter your Date of birth:(mm/dd/yyyy) or (mmddyyyy)")
+    return PERSONAL_DOB
 
-async def handle_birth_cert_no(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def handle_dob(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.message or update.callback_query.message
-    context.user_data["birth_cert_no"] = message.text.strip()
+    context.user_data["dob"] = message.text.strip()
     await message.reply_text("Enter your Phone Number:")
     return PERSONAL_PHONE_NUMBER
 
 async def handle_phone_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.message or update.callback_query.message
     context.user_data["phone_number"] = message.text.strip()
+    #await message.reply_text("Enter your Birth Certificate Number:")
+    """
+    Since the next four fields are optional, I will comment out the code and pass directly to the dropdown selection
+    and will change the return value to ask_dropdown_option
+    """
+    #return PERSONAL_BIRTH_CERT_NO
+    context.user_data["dropdown_step"] = 0  # Reset the dropdown sequence
+    return await ask_dropdown_option(update, context)
+
+"""
+async def handle_birth_cert_no(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    message = update.message or update.callback_query.message
+    context.user_data["birth_cert_no"] = message.text.strip()
     await message.reply_text("Enter your Email:")
     return PERSONAL_EMAIL
 
@@ -466,15 +481,50 @@ async def handle_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 async def handle_height(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.message or update.callback_query.message
     context.user_data["height"] = message.text.strip()
-    await message.reply_text("Enter your Date of birth:")
-    return PERSONAL_DOB
-
-async def handle_dob(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    message = update.message or update.callback_query.message
-    context.user_data["dob"] = message.text.strip()
+    await message.reply_text()
     context.user_data["dropdown_step"] = 0  # Reset the dropdown sequence
     return await ask_dropdown_option(update, context)
 
+async def show_occupation_page(update: Update, context: ContextTypes.DEFAULT_TYPE, options: list, page_num: int) -> int:
+    message = update.message or update.callback_query.message
+    start_idx = page_num * OCCUPATION_PAGE_SIZE
+    end_idx = start_idx + OCCUPATION_PAGE_SIZE
+    page_options = options[start_idx:end_idx]
+
+    keyboard = []
+    # Add occupation buttons (2 per row)
+    for i in range(0, len(page_options), 2):
+        row = []
+        if i < len(page_options):
+            value, text = page_options[i]
+            row.append(InlineKeyboardButton(text, callback_data=f"dropdown_4_{value}"))  # 4 is the step for occupation
+        if i+1 < len(page_options):
+            value, text = page_options[i+1]
+            row.append(InlineKeyboardButton(text, callback_data=f"dropdown_4_{value}"))
+        if row:
+            keyboard.append(row)
+
+    # Add pagination controls if needed
+    pagination_row = []
+    if page_num > 0:
+        pagination_row.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"{PAGINATION_PREFIX}occupation_{page_num-1}"))
+    if end_idx < len(options):
+        pagination_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"{PAGINATION_PREFIX}occupation_{page_num+1}"))
+    if pagination_row:
+        keyboard.append(pagination_row)
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if update.callback_query:
+        await update.callback_query.edit_message_text(
+            text="Please select your Occupation:",
+            reply_markup=reply_markup
+        )
+    else:
+        await message.reply_text("Please select your Occupation:", reply_markup=reply_markup)
+    
+    return DROPDOWN_STATE
+"""
 async def ask_dropdown_option(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.message or update.callback_query.message
     step = context.user_data.get("dropdown_step", 0)
@@ -515,46 +565,6 @@ async def ask_dropdown_option(update: Update, context: ContextTypes.DEFAULT_TYPE
     reply_markup = InlineKeyboardMarkup(keyboard)
     await message.reply_text(f"Please select {label}:", reply_markup=reply_markup)
 
-    return DROPDOWN_STATE
-
-async def show_occupation_page(update: Update, context: ContextTypes.DEFAULT_TYPE, options: list, page_num: int) -> int:
-    message = update.message or update.callback_query.message
-    start_idx = page_num * OCCUPATION_PAGE_SIZE
-    end_idx = start_idx + OCCUPATION_PAGE_SIZE
-    page_options = options[start_idx:end_idx]
-
-    keyboard = []
-    # Add occupation buttons (2 per row)
-    for i in range(0, len(page_options), 2):
-        row = []
-        if i < len(page_options):
-            value, text = page_options[i]
-            row.append(InlineKeyboardButton(text, callback_data=f"dropdown_4_{value}"))  # 4 is the step for occupation
-        if i+1 < len(page_options):
-            value, text = page_options[i+1]
-            row.append(InlineKeyboardButton(text, callback_data=f"dropdown_4_{value}"))
-        if row:
-            keyboard.append(row)
-
-    # Add pagination controls if needed
-    pagination_row = []
-    if page_num > 0:
-        pagination_row.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"{PAGINATION_PREFIX}occupation_{page_num-1}"))
-    if end_idx < len(options):
-        pagination_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"{PAGINATION_PREFIX}occupation_{page_num+1}"))
-    if pagination_row:
-        keyboard.append(pagination_row)
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    if update.callback_query:
-        await update.callback_query.edit_message_text(
-            text="Please select your Occupation:",
-            reply_markup=reply_markup
-        )
-    else:
-        await message.reply_text("Please select your Occupation:", reply_markup=reply_markup)
-    
     return DROPDOWN_STATE
 
 async def handle_dropdown_response(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -607,15 +617,32 @@ async def fill_personal_form_on_page(update: Update, context: ContextTypes.DEFAU
     await page.fill('input[name="geezLastName"]', user_data["amharic_last_name"])
     await page.select_option('select[name="nationalityId"]', "ETHIOPIA")   
     await page.fill('input[name="phoneNumber"]', user_data["phone_number"])
-    await page.fill('input[name="email"]', user_data["email"])
     await page.fill('input[name="birthPlace"]', user_data["birth_place"])
-    await page.fill('input[name="birthCertificatNo"]', user_data["birth_cert_no"])
-    await page.fill('input[name="height"]', user_data["height"])
+    #commented out to avoid optional form filling take time
+    #await page.fill('input[name="email"]', user_data["email"])
+    #await page.fill('input[name="birthCertificatNo"]', user_data["birth_cert_no"])
+    #await page.fill('input[name="height"]', user_data["height"])
 
     await page.get_by_role("button", name="Next").click()
     await page.wait_for_timeout(1000)
-    return await address_region(update, context)
+    """commented out to avoid optional address form filling since region is selected in the site selection area
+    even if the address form is not filled, the bot will work with the region only
 
+     so need to fill all the address form fields 
+
+     here we will only fill the region from the site selection part and skip the rest of the address form
+
+     so inorder not to cause confusion, I commented out the address form filling part and select the region only with the 
+     two lines of codes below
+    """
+    region_select = active_sessions[chat_id]['page'].locator("select[name='region']")
+    await region_select.select_option(value=user_data["region"])
+    await fill_address_form_on_page(update, context)
+    #return await address_region(update, context)
+    
+
+
+"""
 # --- Address Form Filling ---
 async def address_region(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.message or update.callback_query.message
@@ -723,8 +750,15 @@ async def address_po_box(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.user_data["address_po_box"] = message.text.strip()
     await message.reply_text("✅ Address form completed!")
     return await fill_address_form_on_page(update, context)
-
+"""
 async def fill_address_form_on_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Fill the address form on the page using user data.
+    This function is comment out to avoid optional address form filling. for reducing the time
+    and complexity of the bot.
+    If you want to use it, uncomment the code and make sure to add the address fields in the user_data.
+    """
+"""
     message = update.message or update.callback_query.message
     chat_id = message.chat.id
     page = active_sessions[chat_id]['page']
@@ -737,7 +771,7 @@ async def fill_address_form_on_page(update: Update, context: ContextTypes.DEFAUL
     await page.fill('input[name="street"]', user_data["address_street"])
     await page.fill('input[name="houseNo"]', user_data["address_house_no"])
     await page.fill('input[name="poBox"]', user_data["address_po_box"])
-
+"""
     # Click Next buttons
     await page.get_by_role("button", name="Next").click()
     await page.get_by_role("button", name="Next").click()
@@ -1219,24 +1253,24 @@ if __name__ == "__main__":
             PERSONAL_GEZZ_MIDDLENAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_gez_middle_name)],
             PERSONAL_GEZZ_LASTNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_gez_last_name)],
             PERSONAL_BIRTHPLACE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_birth_place)],
-            PERSONAL_BIRTH_CERT_NO: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_birth_cert_no)],
+            #PERSONAL_BIRTH_CERT_NO: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_birth_cert_no)],
             PERSONAL_PHONE_NUMBER: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_phone_number)],
-            PERSONAL_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_email)],
-            PERSONAL_HEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_height)],
+            #PERSONAL_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_email)],
+            #PERSONAL_HEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_height)],
             PERSONAL_DOB: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_dob)],
             DROPDOWN_STATE: [
                 CallbackQueryHandler(handle_dropdown_response, pattern="^dropdown_"),
                 CallbackQueryHandler(handle_dropdown_response, pattern=f"^{PAGINATION_PREFIX}"),
             ],
-            ADDRESS_REGION: [CallbackQueryHandler(address_region_response, pattern="^address_region_")],
-            ADDRESS_CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_city)],
-            ADDRESS_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_state)],
-            ADDRESS_ZONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_zone)],
-            ADDRESS_WOREDA: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_woreda)],
-            ADDRESS_KEBELE: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_kebele)],
-            ADDRESS_STREET: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_street)],
-            ADDRESS_HOUSE_NO: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_house_no)],
-            ADDRESS_PO_BOX: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_po_box)],
+            #ADDRESS_REGION: [CallbackQueryHandler(address_region_response, pattern="^address_region_")],
+            #ADDRESS_CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_city)],
+            #ADDRESS_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_state)],
+            #ADDRESS_ZONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_zone)],
+            #ADDRESS_WOREDA: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_woreda)],
+            #ADDRESS_KEBELE: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_kebele)],
+            #ADDRESS_STREET: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_street)],
+            #ADDRESS_HOUSE_NO: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_house_no)],
+            #ADDRESS_PO_BOX: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_po_box)],
             PAGE_QUANTITY_STATE: [CallbackQueryHandler(handle_page_quantity_response, pattern="^pages_")],
             FILE_UPLOAD_ID_DOC: [
                 MessageHandler(filters.Document.ALL | filters.PHOTO, handle_file_upload),
