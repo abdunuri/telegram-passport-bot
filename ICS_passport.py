@@ -753,6 +753,7 @@ async def address_po_box(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 """
 async def fill_address_form_on_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     # Click Next buttons
+    page = active_sessions[update.effective_chat.id]['page']
     await page.get_by_role("button", name="Next").click()
     await page.get_by_role("button", name="Next").click()
     return await ask_page_quantity(update, context)
