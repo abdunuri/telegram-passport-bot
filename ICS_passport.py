@@ -693,10 +693,10 @@ async def address_region_response(update: Update, context: ContextTypes.DEFAULT_
     
     # Manually trigger change event
     await active_sessions[chat_id]['page'].evaluate(
-        """() => {
+        '''() => {
             const select = document.querySelectorAll("select.form-control")[0];
             select.dispatchEvent(new Event('change', { bubbles: true }));
-        }"""
+        }'''
     )
 
     await query.edit_message_text(text=f"✅ Region selected : {selected_value}!")
