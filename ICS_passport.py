@@ -953,7 +953,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await status_message.edit_text("🚀 Launching browser...")
         
         playwright = await async_playwright().start()
-        browser = await playwright.chromium.launch(headless=True)
+        browser = await playwright.chromium.launch(
+    headless=True,
+    args=[
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process',
+        '--disable-gpu'
+    ]
+)
         browser_context = await browser.new_context()
         page = await browser_context.new_page()
         
@@ -1177,26 +1189,35 @@ async def cleanup_inactive_sessions():
     while True:
         try:
             now = datetime.now()
-            for chat_id in list(active_sessions.keys()):
+            inactive_chats = []
+            
+            for chat_id, session in list(active_sessions.items()):
                 try:
-                    last_active = active_sessions[chat_id].get('last_active')
-                    if last_active and now - last_active > timedelta(minutes=30):
-                        # Cleanup inactive session
-                        if 'page' in active_sessions[chat_id]:
-                            await active_sessions[chat_id]['page'].close()
-                        if 'browser' in active_sessions[chat_id]:
-                            await active_sessions[chat_id]['browser'].close()
-                        if 'playwright' in active_sessions[chat_id]:
-                            await active_sessions[chat_id]['playwright'].stop()
-                        del active_sessions[chat_id]
+                    last_active = session.get('last_active')
+                    if not last_active or (now - last_active) > timedelta(minutes=15):
+                        inactive_chats.append(chat_id)
+                except:
+                    inactive_chats.append(chat_id)
+            
+            for chat_id in inactive_chats:
+                try:
+                    if 'page' in active_sessions[chat_id]:
+                        await active_sessions[chat_id]['page'].close()
+                    if 'browser' in active_sessions[chat_id]:
+                        await active_sessions[chat_id]['browser'].close()
+                    if 'playwright' in active_sessions[chat_id]:
+                        await active_sessions[chat_id]['playwright'].stop()
+                    del active_sessions[chat_id]
                 except Exception as e:
-                    print(f"Error cleaning up session for {chat_id}: {e}")
-            await asyncio.sleep(300)  # Check every 5 minutes
-        except asyncio.CancelledError:
-            break
+                    print(f"Error cleaning up session {chat_id}: {e}")
+            
+            await asyncio.sleep(300)
+            
         except Exception as e:
-            print(f"Error in cleanup task: {e}")
-            await asyncio.sleep(60)  # Wait before retrying
+            print(f"Cleanup error: {e}")
+            await asyncio.sleep(60)
+    import gc
+    gc.collect()
 
 if __name__ == "__main__":
     # Create application
