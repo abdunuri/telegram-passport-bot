@@ -34,44 +34,19 @@ active_sessions = defaultdict(dict)
     PERSONAL_HEIGHT,
     PERSONAL_DOB,
     PERSONAL_DONE,
-    DROPDOWN_STATE 
-) = range(6,20,1)
-#address form states
-(
-    ADDRESS_REGION,
-    ADDRESS_CITY,
-    ADDRESS_STATE,
-    ADDRESS_ZONE,
-    ADDRESS_WOREDA,
-    ADDRESS_KEBELE,
-    ADDRESS_STREET,
-    ADDRESS_HOUSE_NO,
-    ADDRESS_PO_BOX,
-) = range(20,29,1)
-
-PAGE_QUANTITY_STATE= 290
-# File upload states
-(
+    DROPDOWN_STATE,
     FILE_UPLOAD_ID_DOC,
-    FILE_UPLOAD_BIRTH_CERT ,
+    FILE_UPLOAD_BIRTH_CERT,
     PAYMENT_METHOD_STATE,
     SEND_CONFIRMATION_STATE,
     SEND_PAYMENT_INSTRUCTION
-
-)= range(30, 35)
+) = range(6,25,1)
 
 # --- Dropdown Sequence Configuration ---
 DROPDOWN_SEQUENCE = [
-    #('select[name="hairColor"]', "Hair Color", 3),  # Last number is buttons per row
-    #('select[name="eyeColor"]', "Eye Color", 3),
     ('select[name="gender"]', "Gender", 2),
     ('select[name="martialStatus"]', "Marital Status", 3),
-    #('select[name="occupationId"]', "Occupation", 1),  # 1 means we'll use pagination
 ]
-
-# Pagination configuration
-OCCUPATION_PAGE_SIZE = 8  # Number of occupations per page
-PAGINATION_PREFIX = "page_"  # Prefix for pagination callbacks
 MAIN_MENU = 100
 async def ask_region(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.message or update.callback_query.message
@@ -458,75 +433,9 @@ async def handle_dob(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def handle_phone_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.message or update.callback_query.message
     context.user_data["phone_number"] = message.text.strip()
-    #await message.reply_text("Enter your Birth Certificate Number:")
-    """
-    Since the next four fields are optional, I will comment out the code and pass directly to the dropdown selection
-    and will change the return value to ask_dropdown_option
-    """
-    #return PERSONAL_BIRTH_CERT_NO
     context.user_data["dropdown_step"] = 0  # Reset the dropdown sequence
     return await ask_dropdown_option(update, context)
 
-"""
-async def handle_birth_cert_no(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    message = update.message or update.callback_query.message
-    context.user_data["birth_cert_no"] = message.text.strip()
-    await message.reply_text("Enter your Email:")
-    return PERSONAL_EMAIL
-
-async def handle_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    message = update.message or update.callback_query.message
-    context.user_data["email"] = message.text.strip()
-    await message.reply_text("Enter your Height (in cm):")
-    return PERSONAL_HEIGHT
-
-async def handle_height(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    message = update.message or update.callback_query.message
-    context.user_data["height"] = message.text.strip()
-    await message.reply_text()
-    context.user_data["dropdown_step"] = 0  # Reset the dropdown sequence
-    return await ask_dropdown_option(update, context)
-
-async def show_occupation_page(update: Update, context: ContextTypes.DEFAULT_TYPE, options: list, page_num: int) -> int:
-    message = update.message or update.callback_query.message
-    start_idx = page_num * OCCUPATION_PAGE_SIZE
-    end_idx = start_idx + OCCUPATION_PAGE_SIZE
-    page_options = options[start_idx:end_idx]
-
-    keyboard = []
-    # Add occupation buttons (2 per row)
-    for i in range(0, len(page_options), 2):
-        row = []
-        if i < len(page_options):
-            value, text = page_options[i]
-            row.append(InlineKeyboardButton(text, callback_data=f"dropdown_4_{value}"))  # 4 is the step for occupation
-        if i+1 < len(page_options):
-            value, text = page_options[i+1]
-            row.append(InlineKeyboardButton(text, callback_data=f"dropdown_4_{value}"))
-        if row:
-            keyboard.append(row)
-
-    # Add pagination controls if needed
-    pagination_row = []
-    if page_num > 0:
-        pagination_row.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"{PAGINATION_PREFIX}occupation_{page_num-1}"))
-    if end_idx < len(options):
-        pagination_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"{PAGINATION_PREFIX}occupation_{page_num+1}"))
-    if pagination_row:
-        keyboard.append(pagination_row)
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    if update.callback_query:
-        await update.callback_query.edit_message_text(
-            text="Please select your Occupation:",
-            reply_markup=reply_markup
-        )
-    else:
-        await message.reply_text("Please select your Occupation:", reply_markup=reply_markup)
-    
-    return DROPDOWN_STATE
-"""
 async def ask_dropdown_option(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.message or update.callback_query.message
     step = context.user_data.get("dropdown_step", 0)
@@ -551,10 +460,6 @@ async def ask_dropdown_option(update: Update, context: ContextTypes.DEFAULT_TYPE
     context.user_data["dropdown_options"] = valid_options
     context.user_data["current_dropdown_selector"] = selector
 
-    # Special handling for occupation with pagination
-    if label == "Occupation":
-        return await show_occupation_page(update, context, valid_options, 0)
-
     # Create inline keyboard with specified buttons per row
     keyboard = []
     row = []
@@ -573,13 +478,6 @@ async def handle_dropdown_response(update: Update, context: ContextTypes.DEFAULT
     query = update.callback_query
     message = update.message or update.callback_query.message
     await query.answer()
-    
-    # Handle pagination
-    if query.data.startswith(PAGINATION_PREFIX):
-        _, category, page_num = query.data.split("_")
-        page_num = int(page_num)
-        options = context.user_data.get("dropdown_options", [])
-        return await show_occupation_page(update, context, options, page_num)
     
     # Handle normal dropdown selection
     _, step, value = query.data.split("_")
@@ -602,7 +500,7 @@ async def handle_dropdown_response(update: Update, context: ContextTypes.DEFAULT
     # Move to next step
     context.user_data["dropdown_step"] = step + 1
     return await ask_dropdown_option(update, context)
-    
+
 # --- Final Form Filling on Page ---
 async def fill_personal_form_on_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.message or update.callback_query.message
@@ -620,216 +518,20 @@ async def fill_personal_form_on_page(update: Update, context: ContextTypes.DEFAU
     await page.select_option('select[name="nationalityId"]', "ETHIOPIA")   
     await page.fill('input[name="phoneNumber"]', user_data["phone_number"])
     await page.fill('input[name="birthPlace"]', user_data["birth_place"])
-    #commented out to avoid optional form filling take time
-    #await page.fill('input[name="email"]', user_data["email"])
-    #await page.fill('input[name="birthCertificatNo"]', user_data["birth_cert_no"])
-    #await page.fill('input[name="height"]', user_data["height"])
-
     await page.get_by_role("button", name="Next").click()
     await page.wait_for_timeout(1000)
-    """commented out to avoid optional address form filling since region is selected in the site selection area
-    even if the address form is not filled, the bot will work with the region only
-
-     so need to fill all the address form fields 
-
-     here we will only fill the region from the site selection part and skip the rest of the address form
-
-     so inorder not to cause confusion, I commented out the address form filling part and select the region only with the 
-     two lines of codes below
-    """
     region_select = active_sessions[chat_id]['page'].locator("select[name='region']")
     await region_select.select_option(value=user_data["region"])
     await page.fill('input[name="city"]', user_data["city"])
-    await fill_address_form_on_page(update, context)
-    #return await address_region(update, context)
-    
-
-
-
-"""
-# --- Address Form Filling ---
-async def address_region(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    message = update.message or update.callback_query.message
-    chat_id = message.chat.id
-    page = active_sessions[chat_id]['page']
-    await message.reply_text("Please select your region.")
-    select_locator = page.locator("select[name='region']")
-
-    await select_locator.wait_for()
-    options = await select_locator.locator('option').all()
-    valid_options = []
-    
-    for opt in options:
-        value = await opt.get_attribute("value")
-        text = (await opt.inner_text()).strip()
-        if value and "--" not in text:
-            valid_options.append((value, text))
-
-    context.user_data["address_region_options"] = valid_options
-
-    # Create keyboard with 2 buttons per row
-    keyboard = []
-    for i in range(0, len(valid_options), 2):
-        row = []
-        # Add first button of the pair
-        if i < len(valid_options):
-            value, text = valid_options[i]
-            row.append(InlineKeyboardButton(text, callback_data=f"address_region_{value}"))
-        # Add second button of the pair if exists
-        if i+1 < len(valid_options):
-            value, text = valid_options[i+1]
-            row.append(InlineKeyboardButton(text, callback_data=f"address_region_{value}"))
-        keyboard.append(row)
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await message.reply_text("Please select a Region:", reply_markup=reply_markup)
-
-    return ADDRESS_REGION
-
-async def address_region_response(update: Update, context: ContextTypes.DEFAULT_TYPE)-> int:
-    message = update.message or update.callback_query.message
-    query = update.callback_query
-    await query.answer()
-    chat_id = message.chat.id
-    selected_value = query.data.replace("address_region_", "")
-    region_select = active_sessions[chat_id]['page'].locator("select[name='region']")
-    await region_select.select_option(value=selected_value)
-    
-    # Manually trigger change event
-    await active_sessions[chat_id]['page'].evaluate(
-        '''() => {
-            const select = document.querySelectorAll("select.form-control")[0];
-            select.dispatchEvent(new Event('change', { bubbles: true }));
-        }'''
-    )
-
-    await query.edit_message_text(text=f"✅ Region selected : {selected_value}!")
-    await message.reply_text("Please enter your city:")
-    return ADDRESS_CITY
-
-async def address_city(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    message = update.message or update.callback_query.message
-    context.user_data["address_city"] = message.text.strip()
-    await message.reply_text("Please enter your state:")
-    return ADDRESS_STATE
-
-async def address_state(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    message = update.message or update.callback_query.message
-    context.user_data["address_state"] = message.text.strip()
-    await message.reply_text("Please enter your zone:")
-    return ADDRESS_ZONE
-
-async def address_zone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    message = update.message or update.callback_query.message
-    context.user_data["address_zone"] = message.text.strip()
-    await message.reply_text("Please enter your woreda:")
-    return ADDRESS_WOREDA
-
-async def address_woreda(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    message = update.message or update.callback_query.message
-    context.user_data["address_woreda"] = message.text.strip()
-    await message.reply_text("Please enter your kebele:")
-    return ADDRESS_KEBELE
-
-async def address_kebele(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    message = update.message or update.callback_query.message
-    context.user_data["address_kebele"] = message.text.strip()
-    await message.reply_text("Please enter your street:")
-    return ADDRESS_STREET
-
-async def address_street(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    message = update.message or update.callback_query.message
-    context.user_data["address_street"] = message.text.strip()
-    await message.reply_text("Please enter your house number:")
-    return ADDRESS_HOUSE_NO
-
-async def address_house_no(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    message = update.message or update.callback_query.message
-    context.user_data["address_house_no"] = message.text.strip()
-    await message.reply_text("Please enter your PO box:")
-    return ADDRESS_PO_BOX
-
-async def address_po_box(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    message = update.message or update.callback_query.message
-    context.user_data["address_po_box"] = message.text.strip()
-    await message.reply_text("✅ Address form completed!")
-    return await fill_address_form_on_page(update, context)
-"""
-async def fill_address_form_on_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     # Click Next buttons
-    page = active_sessions[update.effective_chat.id]['page']
-    await page.get_by_role("button", name="Next").click()
-    await page.get_by_role("button", name="Next").click()
-    return await ask_page_quantity(update, context)
-
-
-    """
-    Fill the address form on the page using user data.
-    This function is comment out to avoid optional address form filling. for reducing the time
-    and complexity of the bot.
-    If you want to use it, uncomment the code and make sure to add the address fields in the user_data.
-    """
-"""
-    message = update.message or update.callback_query.message
-    chat_id = message.chat.id
-    page = active_sessions[chat_id]['page']
-    user_data = context.user_data
-    await page.fill('input[name="city"]', user_data["address_city"])
-    await page.fill('input[name="state"]', user_data["address_state"])
-    await page.fill('input[name="zone"]', user_data["address_zone"])
-    await page.fill('input[name="woreda"]', user_data["address_woreda"])
-    await page.fill('input[name="kebele"]', user_data["address_kebele"])
-    await page.fill('input[name="street"]', user_data["address_street"])
-    await page.fill('input[name="houseNo"]', user_data["address_house_no"])
-    await page.fill('input[name="poBox"]', user_data["address_po_box"])
-"""
-
-
-async def ask_page_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    message = update.message or update.callback_query.message
-    chat_id = message.chat.id
-    page = active_sessions[chat_id]['page']
-    select_locator = page.locator("select[name='pageQuantity']")
-    await select_locator.wait_for()
-
-    # Get all static dropdown options
-    options = await select_locator.locator('option').all()
-    page_quantity_options = []
-
-    for opt in options:
-        value = await opt.get_attribute("value")
-        text = (await opt.inner_text()).strip()
-        if value and "select" not in text.lower() and "--" not in text:
-            page_quantity_options.append((value, text))
-
-    if not page_quantity_options:
-        await message.reply_text("❌ No page options found.")
-        return ConversationHandler.END
-
-    context.user_data["page_quantity_options"] = page_quantity_options
-    
-    # Create inline keyboard for page quantities
-    keyboard = [
-        [InlineKeyboardButton(text, callback_data=f"pages_{value}")] 
-        for value, text in page_quantity_options
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await message.reply_text("📄 Please select the number of pages for your passport:", reply_markup=reply_markup)
-
-    return PAGE_QUANTITY_STATE
-
-async def handle_page_quantity_response(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    message = update.message or update.callback_query.message
-    chat_id = message.chat.id
-    page = active_sessions[chat_id]['page']
-    selected_value = query.data.replace("pages_", "")
-    await page.locator("select[name='pageQuantity']").select_option(value=selected_value)
-    page_quantity_name = next((text for value, text in context.user_data["page_quantity_options"] if value == selected_value), "Unknown")
-    await query.edit_message_text(text=f"✅ Page quantity selected: {page_quantity_name}!")
-    await page.get_by_role("button", name="Submit").click()
-
+    button = page.get_by_role("button", name="Next")
+    await button.wait_for(state="visible")
+    await button.click()
+    await button.wait_for(state="visible")
+    await button.click()
+    submit_button = page.get_by_role("button", name="Submit")
+    await submit_button.wait_for(state="visible")
+    await submit_button.click()
     return await file_upload_from_telegram(update, context)
 
 async def file_upload_from_telegram(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -844,6 +546,7 @@ async def file_upload_from_telegram(update: Update, context: ContextTypes.DEFAUL
         reply_markup=reply_markup
     )
     return FILE_UPLOAD_ID_DOC
+
 async def handle_file_upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.message or update.callback_query.message
     ALLOWED_EXTENSIONS = {'jpeg', 'jpg', 'png', 'gif', 'pdf'}
@@ -1006,7 +709,6 @@ async def save_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE, page, fil
     await message.reply_text("✅ All done!")
     await message.reply_text("Thank you for using the Ethiopian Passport Booking Bot!")
     await message.reply_text("If you need further assistance, please contact support.")
-    await stop(update, context)
     return ConversationHandler.END
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1026,7 +728,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     # Setup new browser session for this user
     try:
         playwright = await async_playwright().start()
-        browser = await playwright.chromium.launch(headless=True)
+        browser = await playwright.chromium.launch(headless=False)
         browser_context = await browser.new_context()
         page = await browser_context.new_page()
         
@@ -1040,7 +742,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         
         # Initialize user data
         context.user_data.clear()
+        page = active_sessions[chat_id]['page']
+        active_sessions[chat_id]['last_active'] = datetime.now()
         
+        await page.goto("https://www.ethiopianpassportservices.gov.et/request-appointment", 
+                       wait_until="domcontentloaded")
+        await page.wait_for_selector("label[for='defaultChecked2']", timeout=10000)
+        await page.click("label[for='defaultChecked2']")
+        await page.click(".card--link")
+        await page.wait_for_load_state("load")
+        await page.click(".card--teal.flex.flex--column")
+
         await message.reply_text("Welcome to the Ethiopian Passport Booking Bot!")
         await message.reply_text(
             "Please choose an option:",
@@ -1084,16 +796,7 @@ async def new_appointment(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return ConversationHandler.END
     
     try:
-        page = active_sessions[chat_id]['page']
-        active_sessions[chat_id]['last_active'] = datetime.now()
-        
-        await page.goto("https://www.ethiopianpassportservices.gov.et/request-appointment", 
-                       wait_until="domcontentloaded")
-        await page.wait_for_selector("label[for='defaultChecked2']", timeout=10000)
-        await page.click("label[for='defaultChecked2']")
-        await page.click(".card--link")
-        await page.wait_for_load_state("load")
-        await page.click(".card--teal.flex.flex--column")
+
         
         await message.reply_text("✅ Ready! Let's begin your appointment booking.")
         return await ask_region(update, context)
@@ -1261,25 +964,12 @@ if __name__ == "__main__":
             PERSONAL_GEZZ_MIDDLENAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_gez_middle_name)],
             PERSONAL_GEZZ_LASTNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_gez_last_name)],
             PERSONAL_BIRTHPLACE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_birth_place)],
-            #PERSONAL_BIRTH_CERT_NO: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_birth_cert_no)],
             PERSONAL_PHONE_NUMBER: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_phone_number)],
-            #PERSONAL_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_email)],
-            #PERSONAL_HEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_height)],
             PERSONAL_DOB: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_dob)],
             DROPDOWN_STATE: [
                 CallbackQueryHandler(handle_dropdown_response, pattern="^dropdown_"),
-                CallbackQueryHandler(handle_dropdown_response, pattern=f"^{PAGINATION_PREFIX}"),
+                CallbackQueryHandler(handle_dropdown_response),
             ],
-            #ADDRESS_REGION: [CallbackQueryHandler(address_region_response, pattern="^address_region_")],
-            #ADDRESS_CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_city)],
-            #ADDRESS_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_state)],
-            #ADDRESS_ZONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_zone)],
-            #ADDRESS_WOREDA: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_woreda)],
-            #ADDRESS_KEBELE: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_kebele)],
-            #ADDRESS_STREET: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_street)],
-            #ADDRESS_HOUSE_NO: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_house_no)],
-            #ADDRESS_PO_BOX: [MessageHandler(filters.TEXT & ~filters.COMMAND, address_po_box)],
-            PAGE_QUANTITY_STATE: [CallbackQueryHandler(handle_page_quantity_response, pattern="^pages_")],
             FILE_UPLOAD_ID_DOC: [
                 MessageHandler(filters.Document.ALL | filters.PHOTO, handle_file_upload),
                 CallbackQueryHandler(handle_file_upload, pattern="^upload_")
