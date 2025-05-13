@@ -38,12 +38,13 @@ active_sessions = defaultdict(dict)
     PERSONAL_DOB,
     PERSONAL_DONE,
     DROPDOWN_STATE,
+    TIME_SELECTION,
     FILE_UPLOAD_ID_DOC,
     FILE_UPLOAD_BIRTH_CERT,
     PAYMENT_METHOD_STATE,
     SEND_CONFIRMATION_STATE,
     SEND_PAYMENT_INSTRUCTION
-) = range(6,25,1)
+) = range(6,26,1)
 
 # --- Dropdown Sequence Configuration ---
 DROPDOWN_SEQUENCE = [
@@ -831,13 +832,15 @@ async def generate_complete_output(update: Update, context: ContextTypes.DEFAULT
     message = update.message or update.callback_query.message
     chat_id = message.chat.id
     page = active_sessions[chat_id]['page']
+
     await page.wait_for_load_state("networkidle")
     await page.wait_for_selector('div.col-md-4.order-md-2.mb-4.mt-5')
 
     content = await page.content()
     soup = BeautifulSoup(content, 'html.parser')
-    containers = soup.select('div.col-md-4.order-md-2.mb-4.mt-5 ul.list-group.mb-3')
 
+    # === Extract from the right summary column ===
+    containers = soup.select('div.col-md-4.order-md-2.mb-4.mt-5 ul.list-group.mb-3')
     data = {}
     for container in containers:
         items = container.find_all('li', class_='list-group-item')
@@ -849,19 +852,52 @@ async def generate_complete_output(update: Update, context: ContextTypes.DEFAULT
                 value = right.get_text(strip=True)
                 data[key] = value
 
-    # Format the message
+    # === Extract key values from header-display block ===
+    header_section = soup.select_one("div.header-display")
+    if header_section:
+        def extract_field(label_text):
+            label = header_section.find("label", string=re.compile(f"^{label_text}"))
+            if label:
+                value_tag = label.find_parent().find("label", class_="font-weight-bold")
+                return value_tag.get_text(strip=True) if value_tag else None
+            return None
+
+        extra_data = {
+            "Request Type": extract_field("Request Type"),
+            "Request Status": extract_field("Request Status"),
+            "Appointment Date": extract_field("Appointment Date"),
+            "Application Number": extract_field("Application Number"),
+            "Request Mode": "Normal",  # Assuming fixed value, replace if needed
+        }
+    else:
+        extra_data = {}
+
+    # === Format the Telegram message ===
     message_t = "📄 *Your ePassport Summary:*\n\n"
+    priority_order = ["Request Type", "Appointment Date", "Request Mode", "Request Status", "Application Number"]
+
+    for key in priority_order:
+        value = extra_data.get(key)
+        if value:
+            message_t += f"*{key}:* {value}\n"
+
     for key, value in data.items():
-        message_t += f"*{key}:* {value}\n"
+        if key not in priority_order:
+            message_t += f"*{key}:* {value}\n"
 
     await message.reply_text(message_t, parse_mode="Markdown")
 
-    # Extract Application Number and use as filename (sanitize it)
-    app_number = data.get("Application Number", "output").replace(" ", "_")
-    filename = f"{app_number}.pdf"
+    # === Determine app_number and save PDF ===
+    app_number = extra_data.get("Application Number") or next(
+        (v for k, v in data.items() if "Application Number" in k or "Appointment Number" in k),
+        None
+    )
 
-    return await save_pdf(update, context, page, filename=filename,app_number=app_number)
+    filename = f"Passport_Appointment_{app_number}.pdf" if app_number else "Passport_Appointment.pdf"
 
+    return await save_pdf(update, context, page, filename=filename, app_number=app_number)
+
+    
 async def save_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE, page, filename="output.pdf", app_number=None) -> int:
     """Handle post-appointment PDF generation including automatic status check"""
     message = update.message or update.callback_query.message
@@ -917,7 +953,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await status_message.edit_text("🚀 Launching browser...")
         
         playwright = await async_playwright().start()
-        browser = await playwright.chromium.launch(headless=True)
+        browser = await playwright.chromium.launch(headless=False)
         browser_context = await browser.new_context()
         page = await browser_context.new_page()
         
@@ -946,6 +982,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await page.wait_for_selector("label[for='defaultChecked2']")
         await page.click("label[for='defaultChecked2']")
         await page.click(".card--link")
+        await status_message.edit_text("🔄 Redirecting to the appointment page...")
         await page.wait_for_load_state("load")
         await page.click(".card--teal.flex.flex--column")
 
@@ -1035,10 +1072,6 @@ async def get_passport_status_with_updates(page, application_number, status_mess
         if status_message:
             await status_message.edit_text(text)
         await action()
-    
-    # Get status text
-    card = await page.query_selector('a.card--link')
-    return await card.inner_text()
 
 async def generate_status_pdf(page, application_number):
     """Generate the detailed status PDF"""
@@ -1209,6 +1242,10 @@ if __name__ == "__main__":
             DROPDOWN_STATE: [
                 CallbackQueryHandler(handle_dropdown_response, pattern="^dropdown_"),
                 CallbackQueryHandler(handle_dropdown_response),
+            ],
+            TIME_SELECTION: [
+                CallbackQueryHandler(handle_time_slot, pattern="^time_"),
+                CallbackQueryHandler(handle_time_slot),
             ],
             FILE_UPLOAD_ID_DOC: [
                 MessageHandler(filters.Document.ALL | filters.PHOTO, handle_file_upload),
