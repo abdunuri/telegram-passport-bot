@@ -10,7 +10,10 @@ from telegram.ext import (
     ContextTypes,
     filters
 )
-
+import re
+from dateutil import parser
+from pytz import timezone
+import pandas as pd  # For Ethiopian date conversion
 import os
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
@@ -278,37 +281,101 @@ async def ask_branch_response(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def ask_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.message or update.callback_query.message
     chat_id = message.chat.id
-    page = active_sessions[chat_id]['page']
-    calendar_visible = await page.locator("div.react-calendar__month-view__days").is_visible()
-    if not calendar_visible:
-        await message.reply_text("Sorry, we couldn't find any available dates. Please try again later.")
-        await cancel(update, context)
-        return ConversationHandler.END
     
-    # Wait for available dates
-    while True:
+    # Send initial status message
+    status_message = await message.reply_text("🗓 Starting date search... Please wait")
+    
+    try:
+        page = active_sessions[chat_id]['page']
+        
+        # Check if calendar is visible
+        await status_message.edit_text("🔍 Looking for calendar...")
+        calendar_visible = await page.locator("div.react-calendar__month-view__days").is_visible()
+        
+        if not calendar_visible:
+            await status_message.edit_text("⚠️ Calendar not found. Trying to reload...")
+            await page.reload()
+            calendar_visible = await page.locator("div.react-calendar__month-view__days").is_visible()
+            
+            if not calendar_visible:
+                await status_message.edit_text("❌ Sorry, we couldn't find any available dates. Please try again later.")
+                await cancel(update, context)
+                return ConversationHandler.END
+        
+        # Initialize variables for date search
+        month_count = 0
+        max_months_to_check = 12  # Limit to 1 year ahead
+        found_dates = False
+        
+        await status_message.edit_text("🔎 Scanning for available dates...")
+        
+        # Create a progress message that updates frequently
+        progress_message = await message.reply_text("⏳ Checking month 1...")
+        
+        while month_count < max_months_to_check:
+            month_count += 1
+            await progress_message.edit_text(f"🔍 Checking month {month_count} for availability...")
+            
+            # Check current month for available dates
+            day_buttons = await page.locator("div.react-calendar__month-view__days button:not([disabled])").all()
+            
+            if day_buttons:
+                found_dates = True
+                break
+            
+            # If no dates found, go to next month
+            next_button = page.locator("button.react-calendar__navigation__next-button")
+            if await next_button.is_enabled():
+                await next_button.click()
+                await page.wait_for_timeout(800)  # Slightly reduced timeout
+            else:
+                break  # No more months to check
+            
+            # Update progress every 2 months to avoid spamming
+            if month_count % 2 == 0:
+                await progress_message.edit_text(f"⏳ Checked {month_count} months so far...")
+        
+        # Remove progress message
+        await progress_message.delete()
+        
+        if not found_dates:
+            await status_message.edit_text("😔 No available dates found in the next 12 months. Please try again later.")
+            await cancel(update, context)
+            return ConversationHandler.END
+        
+        await status_message.edit_text("✅ Found available dates! Processing...")
+        
+        # Collect all available dates
+        available_days = []
         day_buttons = await page.locator("div.react-calendar__month-view__days button:not([disabled])").all()
-        if day_buttons:
-            break
-        await page.locator("button.react-calendar__navigation__next-button").click()
-        await page.wait_for_timeout(1000)
-
-    available_days = []
-    for i, button in enumerate(day_buttons, start=1):
-        label = await button.locator("abbr").get_attribute("aria-label")
-        if label:
-            available_days.append((i, label, button))
-
-    context.user_data["available_days"] = available_days
-
-    # Create inline keyboard for dates
-    keyboard = [
-        [InlineKeyboardButton(label, callback_data=f"date_{i}")] for i, label, _ in available_days
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await message.reply_text("📅 Available Dates:", reply_markup=reply_markup)
-
-    return 4
+        
+        for i, button in enumerate(day_buttons, start=1):
+            label = await button.locator("abbr").get_attribute("aria-label")
+            if label:
+                available_days.append((i, label, button))
+                # Update status every 5 dates processed
+                if i % 5 == 0:
+                    await status_message.edit_text(f"📋 Processing date {i} of {len(day_buttons)}...")
+        
+        context.user_data["available_days"] = available_days
+        
+        # Create inline keyboard for dates
+        keyboard = [
+            [InlineKeyboardButton(label, callback_data=f"date_{i}")] for i, label, _ in available_days
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Final update with the dates list
+        await status_message.edit_text(
+            f"📅 Found {len(available_days)} available dates:",
+            reply_markup=reply_markup
+        )
+        
+        return 4
+        
+    except Exception as e:
+        await status_message.edit_text(f"❌ Error searching for dates: {str(e)}")
+        return ConversationHandler.END
 
 async def ask_date_response(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -331,51 +398,65 @@ async def select_time_slot(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     message = update.message or update.callback_query.message
     chat_id = message.chat.id
     page = active_sessions[chat_id]['page']
-    # Check for morning slots
+    
+    # Check both slot types simultaneously
     morning_buttons = await page.locator("table#displayMorningAppts input.btn_select").all()
-    if morning_buttons:
-        keyboard = [
-            [InlineKeyboardButton("Morning Slot", callback_data="time_morning")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await message.reply_text("🕒 Available Time Slots:", reply_markup=reply_markup)
-        return 4
-    
-    # Check for afternoon slots
     afternoon_buttons = await page.locator("table#displayAfternoonAppts input.btn_select").all()
-    if afternoon_buttons:
-        keyboard = [
-            [InlineKeyboardButton("Afternoon Slot", callback_data="time_afternoon")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await message.reply_text("🕒 Available Time Slots:", reply_markup=reply_markup)
-        return 4
     
-    await message.reply_text("❌ No time slots available.")
-    return ConversationHandler.END
+    # Determine available slots
+    has_morning = len(morning_buttons) > 0
+    has_afternoon = len(afternoon_buttons) > 0
+
+    if not has_morning and not has_afternoon:
+        await message.reply_text("❌ No time slots available.")
+        return ConversationHandler.END
+
+    # Auto-select if only one type available
+    if has_morning and not has_afternoon:
+        await morning_buttons[0].click()
+        await message.reply_text("⏩ Automatically selected morning slot as it's the only option")
+        await page.get_by_role("button", name="Next").click()
+        return await ask_first_name(update, context)
+        
+    if has_afternoon and not has_morning:
+        await afternoon_buttons[0].click()
+        await message.reply_text("⏩ Automatically selected afternoon slot as it's the only option")
+        await page.get_by_role("button", name="Next").click()
+        return await ask_first_name(update, context)
+
+    # Both available - show choice
+    keyboard = [
+        [InlineKeyboardButton("Morning Slot", callback_data="time_morning"),
+         InlineKeyboardButton("Afternoon Slot", callback_data="time_afternoon")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await message.reply_text(
+        "🕒 Multiple slots available! Please choose:",
+        reply_markup=reply_markup
+    )
+    return TIME_SELECTION
 
 async def handle_time_slot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    message = update.message or update.callback_query.message
     query = update.callback_query
     await query.answer()
-    
-    time_type = query.data.replace("time_", "")
+    message = query.message
     chat_id = message.chat.id
     page = active_sessions[chat_id]['page']
     
+    time_type = query.data.replace("time_", "")
+    
     if time_type == "morning":
-        morning_buttons = await page.locator("table#displayMorningAppts input.btn_select").all()
-        await morning_buttons[0].click()
-        await query.edit_message_text(text="🕒 Selected morning time slot.")
+        button = (await page.locator("table#displayMorningAppts input.btn_select").all())[0]
+        await button.click()
+        await query.edit_message_text(text="✅ Selected morning time slot")
     else:
-        afternoon_buttons = await page.locator("table#displayAfternoonAppts input.btn_select").all()
-        await afternoon_buttons[0].click()
-        await query.edit_message_text(text="🕒 Selected afternoon time slot.")
+        button = (await page.locator("table#displayAfternoonAppts input.btn_select").all())[0]
+        await button.click()
+        await query.edit_message_text(text="✅ Selected afternoon time slot")
 
     await page.get_by_role("button", name="Next").click()
     await page.wait_for_timeout(1000)
     return await ask_first_name(update, context)
-
 # --- Ask Functions ---
 async def ask_first_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.message or update.callback_query.message
@@ -421,20 +502,115 @@ async def handle_gez_last_name(update: Update, context: ContextTypes.DEFAULT_TYP
 async def handle_birth_place(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.message or update.callback_query.message
     context.user_data["birth_place"] = message.text.strip()
-    await message.reply_text("Enter your Date of birth:(mm/dd/yyyy) or (mmddyyyy)")
+    await message.reply_text(
+        "Enter your Date of Birth:\n"
+        "• Format: mm/dd/yyyy or mmddyyyy (Gregorian)\n"
+        "• Or use Ethiopian date: �ዋዋዋ/ሚሜ/ደደ (e.g., 2015/03/12)"
+    )
     return PERSONAL_DOB
+
+def validate_gregorian_date(date_str):
+    """Validate Gregorian date in either mm/dd/yyyy or mmddyyyy format"""
+    try:
+        # Try to parse both formats
+        if '/' in date_str:
+            date_obj = datetime.strptime(date_str, "%m/%d/%Y")
+        else:
+            if len(date_str) != 8:
+                return False
+            date_obj = datetime.strptime(date_str, "%m%d%Y")
+        
+        # Additional sanity checks
+        if date_obj.year < 1900 or date_obj.year > datetime.now().year:
+            return False
+        return date_obj
+    except ValueError:
+        return False
+
+def convert_ethiopian_to_gregorian(eth_date_str):
+    """Convert Ethiopian date (YYYY/MM/DD) to Gregorian"""
+    try:
+        # Basic format validation
+        if not re.match(r'^\d{4}/\d{1,2}/\d{1,2}$', eth_date_str):
+            return False
+            
+        year, month, day = map(int, eth_date_str.split('/'))
+        
+        # Ethiopian date validation
+        if month < 1 or month > 13 or day < 1 or day > 30:
+            return False
+        if month == 13 and day > 5:  # Pagume has only 5 or 6 days
+            return False
+            
+        # Conversion using pandas (requires numpy)
+        eth_date = pd.Timestamp(year=year, month=month, day=day, 
+                               calendar='ethiopian')
+        greg_date = eth_date.to_pydatetime()
+        
+        # Final sanity check
+        if greg_date.year < 1900 or greg_date > datetime.now():
+            return False
+            
+        return greg_date
+    except Exception:
+        return False
 
 async def handle_dob(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.message or update.callback_query.message
-    context.user_data["dob"] = message.text.strip()
-    await message.reply_text("Enter your Phone Number:")
-    return PERSONAL_PHONE_NUMBER
+    dob_input = message.text.strip()
+    
+    # Check for Ethiopian date (contains Ethiopic numbers or Amharic)
+    if re.search(r'[ሀ-ፕ]|[\u1369-\u137C]', dob_input):
+        await message.reply_text("Please enter the date in English numbers (0-9)")
+        return PERSONAL_DOB
+    
+    # Try Ethiopian format (YYYY/MM/DD)
+    if '/' in dob_input and dob_input.count('/') == 2:
+        greg_date = convert_ethiopian_to_gregorian(dob_input)
+        if greg_date:
+            context.user_data["dob"] = greg_date.strftime("%m/%d/%Y")
+            await message.reply_text(f"Converted to Gregorian: {context.user_data['dob']}")
+            await message.reply_text("Enter your Phone Number:")
+            return PERSONAL_PHONE_NUMBER
+    
+    # Try Gregorian formats
+    date_obj = validate_gregorian_date(dob_input)
+    if date_obj:
+        context.user_data["dob"] = date_obj.strftime("%m/%d/%Y")
+        await message.reply_text("Enter your Phone Number:")
+        return PERSONAL_PHONE_NUMBER
+    
+    # If all validations fail
+    await message.reply_text(
+        "❌ Invalid date format. Please enter:\n"
+        "• Gregorian: mm/dd/yyyy or mmddyyyy (e.g., 05/21/1990 or 05211990)\n"
+        "• Ethiopian: YYYY/MM/DD (e.g., 2012/09/12)\n"
+        "• Month (1-12), Day (1-31), Year (1900-now)"
+    )
+    return PERSONAL_DOB
 
 async def handle_phone_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.message or update.callback_query.message
-    context.user_data["phone_number"] = message.text.strip()
-    context.user_data["dropdown_step"] = 0  # Reset the dropdown sequence
-    return await ask_dropdown_option(update, context)
+    phone_number = message.text.strip()
+    
+    # Remove any non-digit characters
+    cleaned_number = ''.join(filter(str.isdigit, phone_number))
+    
+    # Ethiopian phone number validation
+    if (len(cleaned_number) == 10 and 
+        cleaned_number.startswith(('09', '07')) and
+        cleaned_number[2:].isdigit()):
+        
+        context.user_data["phone_number"] = cleaned_number
+        context.user_data["dropdown_step"] = 0  # Reset the dropdown sequence
+        return await ask_dropdown_option(update, context)
+    
+    # If validation fails
+    await message.reply_text(
+        "❌ Invalid Ethiopian phone number. Please enter a 10-digit number starting with 09 or 07.\n"
+        "Example: 0912345678 or 0712345678"
+    )
+    return PERSONAL_PHONE_NUMBER
 
 async def ask_dropdown_option(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.message or update.callback_query.message
@@ -687,46 +863,59 @@ async def generate_complete_output(update: Update, context: ContextTypes.DEFAULT
     return await save_pdf(update, context, page, filename=filename,app_number=app_number)
 
 async def save_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE, page, filename="output.pdf", app_number=None) -> int:
+    """Handle post-appointment PDF generation including automatic status check"""
     message = update.message or update.callback_query.message
-    chat_id = message.chat.id
-    page = active_sessions[chat_id]['page']
-    folder = "filesdownloaded"
-    os.makedirs(folder, exist_ok=True)
-
-    pdf_path = os.path.join(folder, filename)
-    await page.pdf(path=pdf_path)
-    print(f"📄 PDF saved as {pdf_path}")
-
-    # Send PDF to user
-    with open(pdf_path, "rb") as pdf_file:
-        await message.reply_document(document=pdf_file, filename=filename, caption="📎 Here is your instruction PDF.")
-        result= await main_passport_status(page,app_number)
-        if result:
-            await message.reply_text(result)
-
-        with open(f"Passport_status_{app_number}.pdf", "rb") as pdf_file:
-            await message.reply_document(pdf_file, caption="Your Appointment report is ready.")
-    await message.reply_text("✅ All done!")
-    await message.reply_text("Thank you for using the Ethiopian Passport Booking Bot!")
-    await message.reply_text("If you need further assistance, please contact support.")
-    return ConversationHandler.END
+    
+    # 1. Save instruction PDF
+    await message.reply_text("📄 Generating your appointment instructions...")
+    await page.pdf(path=filename)
+    with open(filename, "rb") as pdf_file:
+        await message.reply_document(pdf_file, caption="Appointment Instructions")
+    
+    # 2. Automatically check passport status
+    status_msg = await message.reply_text("⚡ Checking your current passport status...")
+    try:
+        status_text = await get_passport_status_with_updates(page, app_number, status_msg)
+        await status_msg.edit_text("✅ Status check complete!")
+        
+        # Send status PDF
+        pdf_name = f"Passport_Status_{app_number}.pdf"
+        if os.path.exists(pdf_name):
+            with open(pdf_name, "rb") as pdf_file:
+                await message.reply_document(pdf_file, caption="Current Passport Status")
+        await status_msg.edit_text("Thank you for using our service! Your appointment is confirmed.")
+        
+        return ConversationHandler.END
+        
+    except Exception as e:
+        await status_msg.edit_text(f"⚠️ Couldn't check status automatically: {str(e)}")
+        return ConversationHandler.END
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.message or update.callback_query.message
     chat_id = message.chat.id
     
+    # Send initial "preparing" message
+    status_message = await message.reply_text("🛠 Preparing your session... Please wait")
+    
     # Close existing session if any
     if chat_id in active_sessions:
-        if 'page' in active_sessions[chat_id]:
-            await active_sessions[chat_id]['page'].close()
-        if 'browser' in active_sessions[chat_id]:
-            await active_sessions[chat_id]['browser'].close()
-        if 'playwright' in active_sessions[chat_id]:
-            await active_sessions[chat_id]['playwright'].stop()
-        del active_sessions[chat_id]
+        try:
+            if 'page' in active_sessions[chat_id]:
+                await active_sessions[chat_id]['page'].close()
+            if 'browser' in active_sessions[chat_id]:
+                await active_sessions[chat_id]['browser'].close()
+            if 'playwright' in active_sessions[chat_id]:
+                await active_sessions[chat_id]['playwright'].stop()
+            del active_sessions[chat_id]
+        except Exception as e:
+            await status_message.edit_text(f"❌ Error closing previous session: {str(e)}")
+            return ConversationHandler.END
     
-    # Setup new browser session for this user
     try:
+        # Update status
+        await status_message.edit_text("🚀 Launching browser...")
+        
         playwright = await async_playwright().start()
         browser = await playwright.chromium.launch(headless=True)
         browser_context = await browser.new_context()
@@ -745,16 +934,24 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         page = active_sessions[chat_id]['page']
         active_sessions[chat_id]['last_active'] = datetime.now()
         
+        # Update status
+        await status_message.edit_text("🌐 Loading passport service page...")
+        
         await page.goto("https://www.ethiopianpassportservices.gov.et/request-appointment", 
                        wait_until="domcontentloaded")
+        
+        # Update status
+        await status_message.edit_text("⚙️ Configuring your session... Almost there!")
+        
         await page.wait_for_selector("label[for='defaultChecked2']", timeout=10000)
         await page.click("label[for='defaultChecked2']")
         await page.click(".card--link")
         await page.wait_for_load_state("load")
         await page.click(".card--teal.flex.flex--column")
 
-        await message.reply_text("Welcome to the Ethiopian Passport Booking Bot!")
-        await message.reply_text(
+        # Final update with the menu
+        await status_message.edit_text(
+            "✅ You're all set!\n\n"
             "Please choose an option:",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("📅 Book Appointment", callback_data="book_appointment")],
@@ -763,8 +960,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             ])
         )
         return MAIN_MENU
+        
     except Exception as e:
-        await message.reply_text(f"❌ Error initializing session: {str(e)}")
+        await status_message.edit_text(f"❌ Error initializing session: {str(e)}")
+        if chat_id in active_sessions:
+            try:
+                if 'page' in active_sessions[chat_id]:
+                    await active_sessions[chat_id]['page'].close()
+                if 'browser' in active_sessions[chat_id]:
+                    await active_sessions[chat_id]['browser'].close()
+                if 'playwright' in active_sessions[chat_id]:
+                    await active_sessions[chat_id]['playwright'].stop()
+                del active_sessions[chat_id]
+            except:
+                pass
         return ConversationHandler.END
 
 async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -796,8 +1005,6 @@ async def new_appointment(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return ConversationHandler.END
     
     try:
-
-        
         await message.reply_text("✅ Ready! Let's begin your appointment booking.")
         return await ask_region(update, context)
     except Exception as e:
@@ -805,50 +1012,83 @@ async def new_appointment(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return MAIN_MENU
 
 
-async def main_passport_status(page,application_number):
-        await page.goto("https://www.ethiopianpassportservices.gov.et/status", wait_until="domcontentloaded")
-        await page.wait_for_selector('input[placeholder="Application Number"]', timeout=5000)
-        await page.fill('input[placeholder="Application Number"]', application_number)
+async def get_passport_status_with_updates(page, application_number, status_message=None):
+    """Shared function to check passport status with progress updates"""
+    steps = [
+        ("🌍 Connecting to status portal...", 
+         lambda: page.goto("https://www.ethiopianpassportservices.gov.et/status", wait_until="domcontentloaded")),
+         
+        ("🔍 Looking up application...", 
+         lambda: page.fill('input[placeholder="Application Number"]', application_number)),
+         
+        ("⏳ Searching records...", 
+         lambda: page.click('button:has-text("Search")')),
+         
+        ("📋 Retrieving status...", 
+         lambda: page.wait_for_selector('a.card--link', timeout=10000)),
+         
+        ("🖨 Generating report...", 
+         lambda: generate_status_pdf(page, application_number))
+    ]
+    
+    for text, action in steps:
+        if status_message:
+            await status_message.edit_text(text)
+        await action()
+    
+    # Get status text
+    card = await page.query_selector('a.card--link')
+    return await card.inner_text()
 
-        # Click the search button using its text and class
-        await page.click('button:has-text("Search")')
-        await page.wait_for_selector('a.card--link', timeout=5000)
-        card = await page.query_selector('a.card--link')
-        text_content = await card.inner_text()
-        eye_button = await card.query_selector('div i.fa-eye')
-        if eye_button:
-            await eye_button.click()
-        else:
-            print("❌ 'Eye' icon not found.")
-
-        await page.wait_for_timeout(3000)
-        #await enforce_official_styles(page)
-        await generate_official_pdf(page, application_number)
-        return text_content.strip()
-
-async def generate_official_pdf(page, application_number):
+async def generate_status_pdf(page, application_number):
+    """Generate the detailed status PDF"""
+    card = await page.query_selector('a.card--link')
+    eye_button = await card.query_selector('div i.fa-eye')
+    if eye_button:
+        await eye_button.click()
+        await page.wait_for_timeout(2000)
+    
     await page.pdf(
-        path=f"Passport_status_{application_number}.pdf",
-        print_background=True, )
+        path=f"Passport_Status_{application_number}.pdf",
+        print_background=True
+    )
 
 async def ask_application_number(update: Update, context: ContextTypes.DEFAULT_TYPE)-> int:
     message = update.message or update.callback_query.message
     await message.reply_text("Please enter your Application Number to get started.")
     return 1
 
-async def passport_status(update: Update, context: ContextTypes.DEFAULT_TYPE)-> int:
+
+async def passport_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle direct passport status check requests"""
     message = update.message or update.callback_query.message
     chat_id = message.chat.id
-    page = active_sessions[chat_id]['page']
-    passport_number = message.text
-    result= await main_passport_status(page,passport_number)
-    if result:
-        await message.reply_text(result)
-        with open(f"Passport_status_{passport_number}.pdf", "rb") as pdf_file:
-            await message.reply_document(pdf_file, caption="Your passport status report is ready.")
-            await message.reply_text("✅ All done!")
-    await start(update, context)        
-    return ConversationHandler.END
+    application_number = message.text.strip()
+    
+    status_msg = await message.reply_text("🔄 Starting passport status check...")
+    
+    try:
+        page = active_sessions[chat_id]['page']
+        
+        # Get status with progress updates
+        await status_msg.edit_text("🌍 Connecting to passport services...")
+        status_text = await get_passport_status_with_updates(page, application_number, status_msg)
+        
+        # Send results
+        await status_msg.edit_text("✅ Status check complete!")
+        await message.reply_text(f"📋 Passport Status:\n{status_text}")
+        
+        # Send PDF
+        pdf_name = f"Passport_Status_{application_number}.pdf"
+        if os.path.exists(pdf_name):
+            with open(pdf_name, "rb") as pdf_file:
+                await message.reply_document(pdf_file, caption="Official Status Report")
+        
+        return await start(update, context)  # Return to main menu
+        
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Error checking status: {str(e)}")
+        return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.message or update.callback_query.message
