@@ -953,7 +953,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await status_message.edit_text("🚀 Launching browser...")
         
         playwright = await async_playwright().start()
-        browser = await playwright.chromium.launch(headless=False)
+        browser = await playwright.chromium.launch(headless=True)
         browser_context = await browser.new_context()
         page = await browser_context.new_page()
         
