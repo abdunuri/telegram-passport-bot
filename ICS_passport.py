@@ -943,7 +943,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         # Update status
         await status_message.edit_text("⚙️ Configuring your session... Almost there!")
         
-        await page.wait_for_selector("label[for='defaultChecked2']", timeout=10000)
+        await page.wait_for_selector("label[for='defaultChecked2']")
         await page.click("label[for='defaultChecked2']")
         await page.click(".card--link")
         await page.wait_for_load_state("load")
