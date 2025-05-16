@@ -808,7 +808,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     # Setup new browser session for this user
     try:
         playwright = await async_playwright().start()
-        browser = await playwright.chromium.launch(headless=False)
+        browser = await playwright.chromium.launch(headless=True)
         browser_context = await browser.new_context()
         page = await browser_context.new_page()
         await page.goto("https://www.ethiopianpassportservices.gov.et/request-appointment", 
