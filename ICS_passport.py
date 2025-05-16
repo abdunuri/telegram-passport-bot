@@ -1010,7 +1010,7 @@ async def cleanup_inactive_sessions():
 
 if __name__ == "__main__":
     # Create application
-    application = Application.builder().token("8076860650:AAEprRHsyLQFya7gZjQItySYtEyHHX8UsV8").build()
+    application = Application.builder().token("7885486896:AAGn1eU4dEjVGo7pUw6roi9k7VrA3ym1GR4").build()
     
 
     # Status check handler
